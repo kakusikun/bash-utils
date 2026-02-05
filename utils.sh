@@ -215,7 +215,7 @@ u_get_option() {
         if [ $default_val != "x" ]; then
             echo "use default value for option '$key1', '$key2': $default_val" >&2
         fi
-        _out_var="$default_val"
+        _out_var=""
         return 0
     fi
 
