@@ -38,8 +38,10 @@ u_is_dir_exist() {
 }
 
 u_glob_dir() {
-    local -n _out_var=$2
-    _out_var=$(find $2 -maxdepth 1 -type d -name "$1")
+    local name="$1"
+    local dir="$2"
+    local -n _out_var="$3"
+    _out_var=$(find $dir -maxdepth 1 -name "$name")
 }
 
 u_get_base_name() {
@@ -92,8 +94,14 @@ u_git_clone() {
 }
 
 u_get_latest_file() {
-    local target_files=$1
-    local -n _out_var=$2
+    local path="$1"
+    local -n _out_var="$2"
+
+    local target_files
+    local base_name
+    local dir=$(dirname "$path")
+    u_get_base_name "$1" base_name
+    u_glob_dir "$base_name" $dir target_files
 
     latest=""
     for file in $target_files; do
