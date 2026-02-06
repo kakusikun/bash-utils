@@ -2,17 +2,6 @@
 
 set -e
 
-
-u_WD=$PWD
-u_CACHE=$u_WD/.cache
-u_UV=$u_WD/uv
-u_PYTHON_DIR=$u_WD/uv
-
-if [ ! -d $u_CACHE ]; then
-    mkdir -p $u_CACHE
-fi
-
-
 [ -n "$DEBUG" ] && set -x
 
 u_print_commands() {
@@ -30,18 +19,18 @@ u_is_start_with() {
 }
 
 u_is_file_exist() {
-    [ -n "$(find $2 -maxdepth 1 -type f -name "$1")" ]
+    [ -n "$(find "$2" -maxdepth 1 -type f -name "$1")" ]
 }
 
 u_is_dir_exist() {
-    [ -n "$(find $2 -maxdepth 1 -type d -name "$1")" ]
+    [ -n "$(find "$2" -maxdepth 1 -type d -name "$1")" ]
 }
 
 u_glob_dir() {
     local name="$1"
     local dir="$2"
     local -n _out_var="$3"
-    _out_var=$(find $dir -maxdepth 1 -name "$name")
+    _out_var=$(find "$dir" -maxdepth 1 -name "$name")
 }
 
 u_get_base_name() {
@@ -69,27 +58,20 @@ u_get_name() {
 }
 
 u_git_clone() {
-    local url=$1
-    local tag=$2
-    local dst=$3
+    local url="$1"
+    local tag="$2"
+    local dst="$3"
     local repo
 
     repo=${url##*/}
     repo=${repo%*.git}
 
-    if [ ! -d $dst ]; then
-        if [ ! -d $u_CACHE/$repo ]; then
-            git clone $url $u_CACHE/$repo
-        fi
-
-        echo $PWD
-        cp -r $u_CACHE/$repo $dst
-    fi
+    git clone "$url" "$dst/$repo"
 
     (
-        cd $dst &&
+        cd "$dst" &&
             git fetch &&
-            git checkout $tag
+            git checkout "$tag"
     )
 }
 
@@ -98,10 +80,11 @@ u_get_latest_file() {
     local -n _out_var="$2"
 
     local target_files
-    local base_name
-    local dir=$(dirname "$path")
-    u_get_base_name "$1" base_name
-    u_glob_dir "$base_name" $dir target_files
+    local pattern
+    local dir
+    dir=$(dirname "$path")
+    u_get_base_name "$path" pattern
+    u_glob_dir "$pattern" "$dir" target_files
 
     latest=""
     for file in $target_files; do
@@ -170,7 +153,7 @@ u_get_argument() {
     fi
 
     # 3. 若都找不到，檢查參數數量是否大於等於 3 (代表有傳入 default_val)
-    if [ ! -z $default_val ]; then
+    if [ -n "$default_val" ]; then
         echo "use default value for argument '$index': $default_val" >&2
         _out_var="$default_val"
         return 0
@@ -180,7 +163,6 @@ u_get_argument() {
     echo "missing argument. '$index', $doc" >&2
     exit 1
 
-    _out_var=${ARGS[$index]}
 }
 
 u_has_flag() {
@@ -191,7 +173,7 @@ u_has_flag() {
         return 0
     fi
 
-    if echo ${FLAGS[*]} | grep -q "\<${1:2}\>"; then
+    if echo "${FLAGS[@]}" | grep -q "\<${1:2}\>"; then
         _out_var=1
         return 0
     fi
@@ -207,7 +189,7 @@ u_get_option() {
     local -n _out_var="$5"
 
     # 1. 檢查 key1 是否存在且有值
-    if [ ! -z "$key1" ] && [ -n "${OPTS["$key1"]}" ]; then
+    if [ -n "$key1" ] && [ -n "${OPTS["$key1"]}" ]; then
         _out_var="${OPTS["$key1"]}"
         return 0
     fi
@@ -219,8 +201,8 @@ u_get_option() {
     fi
 
     # 3. 若都找不到，檢查參數數量是否大於等於 3 (代表有傳入 default_val)
-    if [ ! -z $default_val ]; then
-        if [ $default_val != "x" ]; then
+    if [ -n "$default_val" ]; then
+        if [ "$default_val" != "x" ]; then
             echo "use default value for option '$key1', '$key2': $default_val" >&2
         fi
         _out_var=""
@@ -234,9 +216,9 @@ u_get_option() {
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "正在執行測試模式..."
-    echo "ARGS: ${ARGS[@]}"
-    echo "OPTS: ${OPTS[@]}"
-    echo "FLAGS: ${FLAGS[@]}"
+    echo "ARGS: " "${ARGS[@]}"
+    echo "OPTS: " "${OPTS[@]}"
+    echo "FLAGS: " "${FLAGS[@]}"
     exit 0
 fi
 
@@ -270,13 +252,13 @@ u_get_package_name() {
     local -n _out_var="$2"
 
     # 檢查是否有傳入參數
-    if [ -z $deb_file ]; then
+    if [ -z "$deb_file" ]; then
         echo "錯誤：請提供 .deb 檔案的路徑。" >&2
         return 1
     fi
 
     # 檢查檔案是否存在且為 .deb 檔案
-    if [ ! -f $deb_file ] || [[ ! $deb_file =~ \.deb$ ]]; then
+    if [ ! -f "$deb_file" ] || [[ ! "$deb_file" =~ \.deb$ ]]; then
         echo "錯誤：檔案不存在或不是有效的 .deb 檔案。" >&2
         return 1
     fi
@@ -285,8 +267,7 @@ u_get_package_name() {
 }
 
 u_is_package_installed() {
-    dpkg-query -W --showformat='${Status}\n' "$1" 2>/dev/null | grep "install ok installed" >/dev/null
-    if [ $? -eq 0 ]; then
+    if dpkg-query -W --showformat='${Status}\n' "$1" 2>/dev/null | grep "install ok installed" >/dev/null; then
         return 0
     fi
 
@@ -356,22 +337,20 @@ u_apt_install() {
 
 u_check_cmd() {
     local cmd=("${@}")
+    
     echo "command:"
     for i in "${cmd[@]}"; do
         echo "    $i"
     done
     echo ""
-    if [ $IS_CHECK_CMD -eq 1 ]; then
-        read -n 1 -s -r -p "Press any key to continue..."
-        echo ""
-    else
-        read -t 5 -n 1 -s -r -p "Press any key to continue (5s)..." input || true
-        echo ""
-    fi
+    read -t 5 -n 1 -s -r -p "Press any key to continue (5s)..." input || true
+    echo ""
 }
 
 u_check_uv() {
-    if [ ! -f $u_UV/uv ]; then
+    local cwd="$1"
+
+    if [ ! -f "$cwd/uv/uv" ]; then
         echo "uv is not found"
         return 1
     fi
@@ -379,110 +358,154 @@ u_check_uv() {
     return 0
 }
 
-
-u_is_python_installed() {
-    local uv_python=$($u_UV/uv python find 2>/dev/null)
-    local sys_python=$(which python 2>/dev/null)
-
-    # 確保兩個變數都有值
-    if [ -n "$uv_python" ] && [ -n "$sys_python" ]; then
-        [ "$(realpath "$uv_python" 2>/dev/null)" = "$(realpath "$sys_python" 2>/dev/null)" ]
-    else
-        return 1
-    fi
-}
-
-u_is_pymodule_installed() {
-    [ u_is_python_installed ] && $($u_UV/uv pip show $1 >/dev/null)
-}
-
 u_install_uv() {
-    local dst=$1
+    local cwd="$1"
+    local dst="$2"
 
-    if [ $dst != $u_UV ] && [ -f $dst/uv ]; then
-        echo "link uv to $dst/uv"
-        ln -sf $dst/uv $u_UV/uv
-    elif ! check_uv; then
+    if [ -n "$dst" ]; then
+        dst=$(realpath "$dst" 2>/dev/null)
+    else
+        dst="$cwd"/uv
+    fi
+
+    if [ "$dst" != "$cwd"/uv ] && [ -f "$dst"/uv ]; then
+        echo "link uv to $dst"
+        ln -sf "$dst" "$cwd"/uv
+    elif ! u_check_uv "$cwd"; then
         echo "install uv to $dst"
         apt_install curl
-        curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=$dst UV_NO_MODIFY_PATH=1 sh
+        curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$dst" UV_NO_MODIFY_PATH=1 sh
     else
-        echo "uv is already installed at $u_UV"
+        echo "uv is already installed at $dst"
+    fi
+
+    return 0
+}
+
+u_clean_uv() {
+    local cwd="$1"
+
+    if [ -L "$cwd/uv" ]; then
+        unlink "$cwd/uv"
+    else
+        "$cwd"/uv/uv cache clean
+        rm -rf "$("$cwd"/uv/uv python dir)"
+        rm -rf "$("$cwd"/uv/uv tool dir)"
+        rm -rf "$cwd"/uv
     fi
 
     return 0
 }
 
 
+u_check_python() {
+    local cwd="$1"
+    local uv_python
+    local sys_python
+    uv_python=$("$cwd"/uv/uv python find 2>/dev/null)
+    sys_python=$(which python 2>/dev/null)
+
+    # 確保兩個變數都有值
+    if [ -n "$uv_python" ] && [ -n "$sys_python" ]; then
+        if [ "$(realpath "$uv_python" 2>/dev/null)" = "$(realpath "$sys_python" 2>/dev/null)" ]; then
+            return 0
+        else
+            echo "not using local python"
+            return 1
+        fi
+    else
+        echo "python is not found"
+        return 1
+    fi
+}
+
+u_check_pymodule() {
+    local cwd="$1"
+    local module="$2"
+    if u_check_python "$cwd"; then
+        if "$cwd"/uv/uv pip show "$module" >/dev/null; then
+            return 0
+        else
+            return 1
+        fi
+    fi
+
+    return 1
+}
+
+
 u_install_python() {
-    local py_ver=$1
-    local venv=$2
-    local is_force=$3
+    local cwd="$1"
+    local py_ver="$2"
+    local venv="$3"
+    local is_force="$4"
 
     echo "Installing python: $py_ver"
     echo "Virtual environment name: $venv"
 
-    if ! u_check_py_version $py_ver; then
+    if ! u_check_py_version "$py_ver"; then
         exit 1
     fi
 
-    if ! u_check_uv; then
+    if ! u_check_uv "$cwd"; then
         exit 1
     fi
 
-    $u_UV/uv python install -i $u_PYTHON_DIR $py_ver
+    "$cwd"/uv/uv python install -i "$cwd"/uv "$py_ver"
 
-    if [ $is_force -eq 1 ] && [ -d $u_WD/.venv_$venv-$py_ver ]; then
-        rm -rf $u_WD/.venv_$venv-$py_ver
+    if [ "$is_force" -eq 1 ] && [ -d "$cwd/$.venv_$venv-$py_ver" ]; then
+        local path
+        path="$cwd/.venv_$venv-$py_ver"
+        rm -rf "${path:?}"
     fi
 
-    if [ ! -d $u_WD/.venv_$venv-$py_ver ]; then
-        $u_UV/uv venv -p $u_PYTHON_DIR/cpython*/bin/python .venv_$venv-$py_ver
+    if [ ! -d "$cwd/.venv_$venv-$py_ver" ]; then
+        "$cwd"/uv/uv venv -p "$cwd"/uv/cpython*/bin/python ".venv_$venv-$py_ver"
     fi
 
-    if [ -L activate_$venv-$py_ver ]; then
-        unlink activate_$venv-$py_ver
+    if [ -L activate_"$venv-$py_ver" ]; then
+        unlink activate_"$venv-$py_ver"
     fi
 
-    ln -s .venv_$venv-$py_ver/bin/activate activate_$venv-$py_ver
+    ln -s "$cwd/.venv_$venv-$py_ver"/bin/activate activate_"$venv-$py_ver"
     echo "source activate_$venv-$py_ver to use python"
     
     return 0
 }
 
-
-u_check_python_environment() {
-
-    if ! u_is_python_installed; then
-        echo "python is not found"
-        echo "if python has been installed, run 'source activate_<venv-name>' to activate"
-        return 1
-    fi
-
-    return 0
+u_clean_python() {
+    local cwd="$1"
+    
+    rm -rf "$cwd"/.venv_*
+    
+    for f in "$cwd"/activate*; do
+        unlink "$f"
+    done
 }
 
 u_install_project() {
+    local cwd="$1"
     # pip install cuml-cu11==21.12.02 --extra-index-url=https://pypi.nvidia.com
-    $u_UV/uv pip install -e .
+    "$cwd"/uv/uv pip install -e .
 }
 
 u_install_package() {
-    local pkgname=$1
+    local cwd="$1"
+    local pkgname="$2"
 
-    $u_UV/uv pip install $pkgname
+    "$cwd"/uv/uv pip install "$pkgname"
 }
 
 u_install_pybind() {
-    local dst=$1
-    local ver=$2
+    local dst="$1"
+    local ver="$2"
 
-    if [ -z $ver ]; then
+    if [ -z "$ver" ]; then
         ver=2.12.0
     fi
 
-    if [ ! -d $dst/pybind11 ]; then
-        u_git_clone https://github.com/pybind/pybind11.git v2.12.0 $dst/pybind11
+    if [ ! -d "$dst"/pybind11 ]; then
+        u_git_clone https://github.com/pybind/pybind11.git v2.12.0 "$dst"/pybind11
     fi
 }
 
@@ -492,8 +515,9 @@ u_check_cmake() {
         echo "cmake is not found"
         return 1
     else
-        local required_version=$1
-        local current_version=$(cmake --version | awk 'NR==1 {print $3}')
+        local required_version="$1"
+        local current_version
+        current_version=$(cmake --version | awk 'NR==1 {print $3}')
 
         if dpkg --compare-versions "$current_version" "ge" "$required_version"; then
             echo "CMake version: $current_version >= $required_version"
@@ -506,41 +530,66 @@ u_check_cmake() {
 }
 
 u_install_cmake() {
-    local ver=$1
-    local is_link=$2
+    local cwd="$1"
+    local ver="$2"
+    local is_link="$3"
 
-    if ! u_check_cmake $ver; then
+    mkdir -p "$cwd/.cache"
+
+    if ! u_check_cmake "$ver"; then
         echo "Installing cmake $ver"
-        local arch=$(uname -m)
-        if [ ! -f $u_CACHE/cmake-${ver}-linux-${arch}.sh ]; then
-            echo "Downloading cmake-${ver}-linux-$arch.sh"
-            wget -P $u_CACHE https://github.com/Kitware/CMake/releases/download/v${ver}/cmake-${ver}-linux-${arch}.sh
+        local arch
+        arch=$(uname -m)
+        if [ ! -f "$cwd/.cache/cmake-$ver-linux-$arch.sh" ]; then
+            echo "Downloading cmake-$ver-linux-$arch.sh"
+            wget -P "$cwd/.cache" "https://github.com/Kitware/CMake/releases/download/v$ver/cmake-$ver-linux-$arch.sh"
         fi
-        if [ ! -d $u_CACHE/cmake-${ver}-linux-${arch} ]; then
-            cd $u_CACHE && bash cmake-${ver}-linux-${arch}.sh --include-subdir --skip-license && cd -
+        if [ ! -d "$cwd/.cache/cmake-$ver-linux-$arch" ]; then
+            cd "$cwd/.cache" && bash "cmake-$ver-linux-$arch.sh" --include-subdir --skip-license && cd -
         fi
-        if [ $is_link -eq 1 ]; then
+        if [ "$is_link" -eq 1 ]; then
             if [ -L /usr/local/bin/cmake ]; then
                 sudo unlink /usr/local/bin/cmake
                 echo "unlink /usr/local/bin/cmake"
             fi
-            sudo ln -s $u_CACHE/cmake-${ver}-linux-${arch}/bin/cmake /usr/local/bin/cmake
+            sudo ln -s "$cwd/.cache/cmake-$ver-linux-$arch/bin/cmake" /usr/local/bin/cmake
             echo "create symlink /usr/local/bin/cmake"
         fi
     fi
 }
 
+u_clean_cmake() {
+    local cwd="$1"
+
+    if [ -L /usr/local/bin/cmake ]; then
+        local real_path
+        local real_parent="$cwd/.cache/cmake"
+        real_path=$(readlink /usr/local/bin/cmake)
+
+        if [[ "$real_path" == "$real_parent"/* ]]; then
+            sudo unlink /usr/local/bin/cmake
+            echo "unlink /usr/local/bin/cmake"
+        fi
+    fi
+
+    rm -rf "$cwd"/.cache/cmake*
+
+    return 0
+}
+
 u_build_wheel() {
-    $u_UV/uv build --wheel
+    local cwd="$1"
+    "$cwd"/uv/uv build --wheel
 }
 
 u_build_lib() {
-    local src=$1
-    local output=$2
+    local cwd="$1"
+    local src="$2"
+    local output="$3"
 
     if [ ! -x "$(which nuitka)" ]; then
-        $u_UV/uv pip install nuitka
+        "$cwd"/uv/uv pip install nuitka
     fi
 
-    nuitka --include-package=mrtabn --output-dir=$output --module $src
+    nuitka --include-package=mrtabn --output-dir="$output" --module "$src"
 }
