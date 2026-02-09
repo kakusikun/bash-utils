@@ -122,7 +122,7 @@ u_parse_arguments() {
                 shift 1
             else
                 # 視為 Key-Value
-                OPTS["$key"]="$val" # <--- 這裡也要確保賦值安全
+                OPTS["$key"]="${val%/}" # <--- 這裡也要確保賦值安全
                 shift 2
             fi
         else
