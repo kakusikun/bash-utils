@@ -29,8 +29,9 @@ u_is_dir_exist() {
 u_glob_dir() {
     local name="$1"
     local dir="$2"
-    local -n _out_var="$3"
-    _out_var=$(find "$dir" -maxdepth 1 -name "$name")
+    local -n _out_arr="$3"
+
+    mapfile -d '' _out_arr < <(find "$dir" -maxdepth 1 -name "$name" -print0)
 }
 
 u_get_base_name() {
@@ -204,6 +205,8 @@ u_get_option() {
     if [ -n "$default_val" ]; then
         if [ "$default_val" != "x" ]; then
             echo "use default value for option '$key1', '$key2': $default_val" >&2
+            _out_var="$default_val"
+            return 0
         fi
         _out_var=""
         return 0
@@ -277,10 +280,14 @@ u_is_package_installed() {
 u_install_or_upgrade_deb() {
     local deb_file="$1"
 
+    if [ -z "$deb_file" ]; then
+        return 0
+    fi
+
     # 1. 檢查檔案是否存在
     if [ ! -f "$deb_file" ]; then
         echo "file not found: '$deb_file'" >&2
-        return 1
+        return 0
     fi
 
     # 2. 從 .deb 檔案中讀取套件名稱與新版本
@@ -325,7 +332,6 @@ u_apt_install() {
     # 1. 檢查是否已安裝
     # dpkg -s 會檢查套件狀態，&> /dev/null 把輸出丟掉，只看回傳值
     if dpkg -s "$pkg_name" &> /dev/null; then
-        echo "$pkg_name has already been installed。"
         return 0
     fi
 
@@ -349,6 +355,11 @@ u_check_cmd() {
 
 u_check_uv() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
 
     if [ ! -f "$cwd/uv/uv" ]; then
         echo "uv is not found"
@@ -360,6 +371,11 @@ u_check_uv() {
 
 u_install_uv() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
     local dst="$2"
 
     if [ -n "$dst" ]; then
@@ -373,7 +389,7 @@ u_install_uv() {
         ln -sf "$dst" "$cwd"/uv
     elif ! u_check_uv "$cwd"; then
         echo "install uv to $dst"
-        apt_install curl
+        u_apt_install curl
         curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$dst" UV_NO_MODIFY_PATH=1 sh
     else
         echo "uv is already installed at $dst"
@@ -384,6 +400,11 @@ u_install_uv() {
 
 u_clean_uv() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
 
     if [ -L "$cwd/uv" ]; then
         unlink "$cwd/uv"
@@ -400,6 +421,11 @@ u_clean_uv() {
 
 u_check_python() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
     local uv_python
     local sys_python
     uv_python=$("$cwd"/uv/uv python find 2>/dev/null)
@@ -421,6 +447,11 @@ u_check_python() {
 
 u_check_pymodule() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
     local module="$2"
     if u_check_python "$cwd"; then
         if "$cwd"/uv/uv pip show "$module" >/dev/null; then
@@ -436,6 +467,11 @@ u_check_pymodule() {
 
 u_install_python() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
     local py_ver="$2"
     local venv="$3"
     local is_force="$4"
@@ -460,14 +496,17 @@ u_install_python() {
     fi
 
     if [ ! -d "$cwd/.venv_$venv-$py_ver" ]; then
-        "$cwd"/uv/uv venv -p "$cwd"/uv/cpython*/bin/python ".venv_$venv-$py_ver"
+        local arch
+        arch=$(uname -m)
+        osname=$(uname -s | tr '[:upper:]' '[:lower:]')
+        "$cwd"/uv/uv venv -p "$cwd/uv/cpython-$py_ver-$osname-$arch-gnu/bin/python" "$cwd/.venv_$venv-$py_ver"
     fi
 
-    if [ -L activate_"$venv-$py_ver" ]; then
-        unlink activate_"$venv-$py_ver"
+    if [ -L "$cwd/activate_$venv-$py_ver" ]; then
+        unlink "$cwd/activate_$venv-$py_ver"
     fi
 
-    ln -s "$cwd/.venv_$venv-$py_ver"/bin/activate activate_"$venv-$py_ver"
+    ln -s "$cwd/.venv_$venv-$py_ver"/bin/activate "$cwd/activate_$venv-$py_ver"
     echo "source activate_$venv-$py_ver to use python"
     
     return 0
@@ -475,6 +514,11 @@ u_install_python() {
 
 u_clean_python() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
     
     rm -rf "$cwd"/.venv_*
     
@@ -485,12 +529,22 @@ u_clean_python() {
 
 u_install_project() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
     # pip install cuml-cu11==21.12.02 --extra-index-url=https://pypi.nvidia.com
-    "$cwd"/uv/uv pip install -e .
+    "$cwd"/uv/uv pip install -e "$cwd"
 }
 
 u_install_package() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
     local pkgname="$2"
 
     "$cwd"/uv/uv pip install "$pkgname"
@@ -531,6 +585,11 @@ u_check_cmake() {
 
 u_install_cmake() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
     local ver="$2"
     local is_link="$3"
 
@@ -560,6 +619,11 @@ u_install_cmake() {
 
 u_clean_cmake() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
 
     if [ -L /usr/local/bin/cmake ]; then
         local real_path
@@ -579,11 +643,21 @@ u_clean_cmake() {
 
 u_build_wheel() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
     "$cwd"/uv/uv build --wheel
 }
 
 u_build_lib() {
     local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
     local src="$2"
     local output="$3"
 
