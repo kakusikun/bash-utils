@@ -237,9 +237,12 @@ u_safe_delete() {
         return 1
     fi
     
+    local basename
+    u_get_base_name "$target" basename
+
     # 3. 執行刪除
     mkdir -p /tmp/recycle
-    rm -rf /tmp/recycle/"$target"
+    rm -rf /tmp/recycle/"$basename"
     mv "$target" /tmp/recycle
 }
 
