@@ -225,28 +225,21 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     exit 0
 fi
 
-u_check_py_version() {
-    local version="$1"
-
-    # 1. Regex 優化：支援多位數 (如 3.10) 且不強制要求第三位版號
-    # ^ 代表開頭，確保不會比對到奇怪的字串
-    if [[ "$version" =~ ^([0-9]+)\.([0-9]+) ]]; then
-        local major=${BASH_REMATCH[1]}
-        local minor=${BASH_REMATCH[2]}
-
-        # 2. 邏輯檢查：使用 (( ... )) 進行數值運算較直觀
-        # 這裡保留你的邏輯：必須是 Python 3，且次版本需 >= 6
-        if (( major != 3 )) || (( minor < 6 )); then
-            echo "Invalid python version: $version. Only 3.6+ is supported."
-            return 1  # 3. 關鍵修正：使用 return 立即退出函式
-        fi
-    else
-        echo "Failed to parse Python version: '$version'"
+u_safe_delete() {
+    local target="$1"
+    
+    # 1. 檢查是否為空
+    [[ -z "$target" ]] && { echo "empty path"; return 1; }
+    
+    # 2. 絕對禁止的路徑黑名單
+    if [[ "$target" == "/" || "$target" == "/bin" || "$target" == "/usr" || "$target" == "/etc" ]]; then
+        echo "forbidden path: $target"
         return 1
     fi
-
-    # 驗證通過
-    return 0
+    
+    # 3. 執行刪除
+    mkdir -p /tmp/recycle
+    mv "$target" /tmp/recycle
 }
 
 # 定義一個 function 來取得 .deb 檔案的套件名稱
@@ -405,19 +398,45 @@ u_clean_uv() {
         return 1
     fi
     
+    if ! u_check_uv "$cwd"; then
+        return 0
+    fi
 
     if [ -L "$cwd/uv" ]; then
         unlink "$cwd/uv"
     else
         "$cwd"/uv/uv cache clean
-        rm -rf "$("$cwd"/uv/uv python dir)"
-        rm -rf "$("$cwd"/uv/uv tool dir)"
-        rm -rf "$cwd"/uv
+        u_safe_delete "$("$cwd"/uv/uv python dir)"
+        u_safe_delete "$("$cwd"/uv/uv tool dir)"
+        u_safe_delete "$cwd"/uv
     fi
 
     return 0
 }
 
+u_check_py_version() {
+    local version="$1"
+
+    # 1. Regex 優化：支援多位數 (如 3.10) 且不強制要求第三位版號
+    # ^ 代表開頭，確保不會比對到奇怪的字串
+    if [[ "$version" =~ ^([0-9]+)\.([0-9]+) ]]; then
+        local major=${BASH_REMATCH[1]}
+        local minor=${BASH_REMATCH[2]}
+
+        # 2. 邏輯檢查：使用 (( ... )) 進行數值運算較直觀
+        # 這裡保留你的邏輯：必須是 Python 3，且次版本需 >= 6
+        if (( major != 3 )) || (( minor < 6 )); then
+            echo "Invalid python version: $version. Only 3.6+ is supported."
+            return 1  # 3. 關鍵修正：使用 return 立即退出函式
+        fi
+    else
+        echo "Failed to parse Python version: '$version'"
+        return 1
+    fi
+
+    # 驗證通過
+    return 0
+}
 
 u_check_python() {
     local cwd="$1"
@@ -492,7 +511,7 @@ u_install_python() {
     if [ "$is_force" -eq 1 ] && [ -d "$cwd/$.venv_$venv-$py_ver" ]; then
         local path
         path="$cwd/.venv_$venv-$py_ver"
-        rm -rf "${path:?}"
+        u_safe_delete "$path"
     fi
 
     if [ ! -d "$cwd/.venv_$venv-$py_ver" ]; then
@@ -519,12 +538,226 @@ u_clean_python() {
         return 1
     fi
     
-    
-    rm -rf "$cwd"/.venv_*
+    if ! u_check_python "$cwd"; then
+        return 0
+    fi
+
+    for f in "$cwd"/.venv*; do
+        u_safe_delete "$f"
+    done
     
     for f in "$cwd"/activate*; do
         unlink "$f"
     done
+}
+
+u_check_go_version() {
+    local version="$1"
+
+    # 1. Regex 優化：支援多位數 (如 3.10) 且不強制要求第三位版號
+    # ^ 代表開頭，確保不會比對到奇怪的字串
+    if [[ "$version" =~ 1\.([0-9]+)\.[0-9]+ ]]; then
+        local major=${BASH_REMATCH[1]}
+
+        # 2. 邏輯檢查：使用 (( ... )) 進行數值運算較直觀
+        if (( major < 18 )); then
+            echo "Invalid go version: $version. Only 1.18+ is supported."
+            return 1  # 3. 關鍵修正：使用 return 立即退出函式
+        fi
+    else
+        echo "Failed to parse go version: '$version'"
+        return 1
+    fi
+
+    # 驗證通過
+    return 0
+}
+
+u_check_go() {
+    local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
+    if [ ! -d "$cwd/.goenv/versions" ]; then
+        echo "go is not found"
+        return 1
+    fi
+
+    local dir
+    local ver
+    u_get_latest_file "$cwd/.goenv/versions/*.*.*" dir
+    u_get_base_name "$dir" ver
+
+    if ! u_check_go_version "$ver"; then
+        echo "go version is not supported"
+        return 1
+    fi
+    
+    return 0
+}
+
+u_get_go() {
+    local cwd="$1"
+    local _out_var="$2"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
+    if ! u_check_go "$cwd"; then
+        return 1
+    fi
+
+    local go
+    local go_ver_path
+    u_get_latest_file "$cwd/.goenv/versions/*.*.*" go_ver_path
+
+    _out_var=$go_ver_path/bin/go
+}
+
+u_check_gopkg() {
+    local cwd="$1"
+    local pkgname="$2"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+
+    local go
+    local gopath
+    u_get_go "$cwd" go
+    gopath=$($go env GOPATH)
+
+    if [ ! -f "$gopath"/pkg/mod/"$pkgname" ]; then
+        return 1
+    fi
+
+    return 0
+}
+
+u_check_gobin() {
+    local cwd="$1"
+    local binname="$2"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+
+    local go
+    local gopath
+    u_get_go "$cwd" go
+    gopath=$($go env GOPATH)
+
+    if [ ! -f "$gopath"/bin/"$binname" ]; then
+        return 1
+    fi
+
+    return 0
+}    
+
+u_install_go() {
+    local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
+    local go_ver="$2"
+    local is_force="$3"
+
+    echo "Installing go $go_ver"
+    
+    if ! u_check_go_version "$go_ver"; then
+        exit 1
+    fi
+
+    if [ "$is_force" -eq 1 ] && [ -d "$cwd/.goenv/versions/$go_ver" ]; then
+        GOENV_ROOT="$cwd"/.goenv "$cwd"/.goenv/bin/goenv uninstall "$go_ver"
+    fi
+
+    if [ ! -d "$cwd/.goenv/versions/$go_ver" ]; then
+        u_git_clone https://github.com/syndbg/goenv.git 2.2.34 "$cwd"/.goenv
+        GOENV_ROOT="$cwd"/.goenv "$cwd"/.goenv/bin/goenv install "$go_ver"
+    fi
+
+    if [ -L "$cwd/activate_go-$go_ver" ]; then
+        unlink "$cwd/activate_go-$go_ver"
+    fi
+
+    echo "PATH=$cwd/.goenv/versions/$go_ver/bin:\$PATH" >"$cwd/activate_go-$go_ver"
+
+    echo "source activate_go-$go_ver to use go"
+    
+}
+
+u_install_gobin() {
+    local cwd="$1"
+    local url="$2"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+
+    local go
+    u_get_go "$cwd" go
+
+    "$go" install "$url"
+}
+
+u_install_gopkg() {
+    local cwd="$1"
+    local url="$2"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+
+    local go
+    u_get_go "$cwd" go
+
+    "$go" get "$url"
+}
+
+u_build_golib() {
+    local cwd="$1"
+    local dst="$2"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+
+    local go
+    u_get_go "$cwd" go
+
+    "$go" build -buildvcs=false -o "$dst"
+}
+
+u_clean_go() {
+    local cwd="$1"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+
+    if ! u_check_go "$cwd"; then
+        return 0
+    fi
+
+    local go
+    local gopath
+    u_get_go "$cwd" go
+    gopath=$($go env GOPATH)
+
+    u_safe_delete "$gopath"
+
+    u_safe_delete "$cwd"/.goenv
+
+    for f in "$cwd"/activate*; do
+        unlink "$f"
+    done
+
 }
 
 u_install_project() {
@@ -624,6 +857,9 @@ u_clean_cmake() {
         return 1
     fi
     
+    if ! u_check_cmake "$cwd"; then
+        return 0
+    fi
 
     if [ -L /usr/local/bin/cmake ]; then
         local real_path
@@ -636,7 +872,9 @@ u_clean_cmake() {
         fi
     fi
 
-    rm -rf "$cwd"/.cache/cmake*
+    for f in "$cwd"/.cache/cmake*; do
+        u_safe_delete "$f"
+    done
 
     return 0
 }
