@@ -239,6 +239,7 @@ u_safe_delete() {
     
     # 3. 執行刪除
     mkdir -p /tmp/recycle
+    rm -rf /tmp/recycle/"$target"
     mv "$target" /tmp/recycle
 }
 
