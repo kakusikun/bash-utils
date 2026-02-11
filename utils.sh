@@ -28,10 +28,10 @@ u_is_dir_exist() {
 
 u_glob_dir() {
     local name="$1"
-    local dir="$2"
+    local folder="$2"
     local -n _out_arr="$3"
 
-    mapfile -d '' _out_arr < <(find "$dir" -maxdepth 1 -name "$name" -print0)
+    mapfile -d '' _out_arr < <(find "$folder" -maxdepth 1 -name "$name" -print0)
 }
 
 u_get_base_name() {
@@ -62,12 +62,8 @@ u_git_clone() {
     local url="$1"
     local tag="$2"
     local dst="$3"
-    local repo
 
-    repo=${url##*/}
-    repo=${repo%*.git}
-
-    git clone "$url" "$dst/$repo"
+    git clone "$url" "$dst"
 
     (
         cd "$dst" &&
@@ -82,10 +78,10 @@ u_get_latest_file() {
 
     local target_files
     local pattern
-    local dir
-    dir=$(dirname "$path")
+    local folder
+    folder=$(dirname "$path")
     u_get_base_name "$path" pattern
-    u_glob_dir "$pattern" "$dir" target_files
+    u_glob_dir "$pattern" "$folder" target_files
 
     latest=""
     for file in $target_files; do
@@ -589,10 +585,10 @@ u_check_go() {
         return 1
     fi
 
-    local dir
+    local folder
     local ver
-    u_get_latest_file "$cwd/.goenv/versions/*.*.*" dir
-    u_get_base_name "$dir" ver
+    u_get_latest_file "$cwd/.goenv/versions/*.*.*" folder
+    u_get_base_name "$folder" ver
 
     if ! u_check_go_version "$ver"; then
         echo "go version is not supported"
@@ -604,7 +600,7 @@ u_check_go() {
 
 u_get_go() {
     local cwd="$1"
-    local _out_var="$2"
+    local -n _out_var="$2"
     
     if [ -z "$cwd" ]; then
         return 1
@@ -614,12 +610,38 @@ u_get_go() {
         return 1
     fi
 
-    local go
     local go_ver_path
     u_get_latest_file "$cwd/.goenv/versions/*.*.*" go_ver_path
 
     _out_var=$go_ver_path/bin/go
 }
+
+u_get_gobin() {
+    local cwd="$1"
+    local binname="$2"
+    local -n _out_var="$3"
+    
+    if [ -z "$cwd" ]; then
+        return 1
+    fi
+    
+    if ! u_check_go "$cwd"; then
+        return 1
+    fi
+
+    local gobin
+    local gopath
+    u_get_go "$cwd" gobin
+    gopath=$($gobin env GOPATH)
+
+    if [ ! -f "$gopath"/bin/"$binname" ]; then
+        return 1
+    fi
+
+    _out_var="$gopath"/bin/"$binname"
+}
+
+
 
 u_check_gopkg() {
     local cwd="$1"
@@ -629,10 +651,10 @@ u_check_gopkg() {
         return 1
     fi
 
-    local go
+    local gobin
     local gopath
-    u_get_go "$cwd" go
-    gopath=$($go env GOPATH)
+    u_get_go "$cwd" gobin
+    gopath=$($gobin env GOPATH)
 
     if [ ! -f "$gopath"/pkg/mod/"$pkgname" ]; then
         return 1
@@ -649,10 +671,10 @@ u_check_gobin() {
         return 1
     fi
 
-    local go
+    local gobin
     local gopath
-    u_get_go "$cwd" go
-    gopath=$($go env GOPATH)
+    u_get_go "$cwd" gobin
+    gopath=$($gobin env GOPATH)
 
     if [ ! -f "$gopath"/bin/"$binname" ]; then
         return 1
@@ -696,20 +718,6 @@ u_install_go() {
     
 }
 
-u_install_gobin() {
-    local cwd="$1"
-    local url="$2"
-    
-    if [ -z "$cwd" ]; then
-        return 1
-    fi
-
-    local go
-    u_get_go "$cwd" go
-
-    "$go" install "$url"
-}
-
 u_install_gopkg() {
     local cwd="$1"
     local url="$2"
@@ -718,10 +726,10 @@ u_install_gopkg() {
         return 1
     fi
 
-    local go
-    u_get_go "$cwd" go
+    local gobin
+    u_get_go "$cwd" gobin
 
-    "$go" get "$url"
+    "$gobin" install "$url"
 }
 
 u_build_golib() {
@@ -732,10 +740,15 @@ u_build_golib() {
         return 1
     fi
 
-    local go
-    u_get_go "$cwd" go
+    local gobin
+    u_get_go "$cwd" gobin
 
-    "$go" build -buildvcs=false -o "$dst"
+    if ! ( 
+        cd "$cwd" && 
+        "$gobin" build -buildvcs=false -o "$dst"
+    ); then
+        return 1
+    fi
 }
 
 u_clean_go() {
@@ -749,10 +762,10 @@ u_clean_go() {
         return 0
     fi
 
-    local go
+    local gobin
     local gopath
-    u_get_go "$cwd" go
-    gopath=$($go env GOPATH)
+    u_get_go "$cwd" gobin
+    gopath=$($gobin env GOPATH)
 
     u_safe_delete "$gopath"
 
