@@ -242,6 +242,20 @@ u_safe_delete() {
     mv "$_safe_delete__target" /tmp/recycle
 }
 
+u_check_version_format() {
+    local version="$1"
+    
+    # 定義正則表達式：開頭(^) + 數字(\.) + 數字(\.) + 數字 + 結尾($)
+    # ⚠️ 注意：在 Bash 中，=~ 右邊的正則表達式絕對不可以加雙引號 ""
+    local regex="^[0-9]+\.[0-9]+\.[0-9]+$"
+
+    if [[ "$version" =~ $regex ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
 # 定義一個 function 來取得 .deb 檔案的套件名稱
 u_get_package_name() {
     local _get_package_name__deb_file="$1"
@@ -429,9 +443,6 @@ u_check_py_version() {
             echo "Invalid python version: $_check_py_version__ver. Only 3.6+ is supported."
             return 1  # 3. 關鍵修正：使用 return 立即退出函式
         fi
-    else
-        echo "Failed to parse Python version: '$_check_py_version__ver'"
-        return 1
     fi
 
     # 驗證通過
@@ -494,6 +505,11 @@ u_install_python() {
     local _install_python__ver="$2"
     local _install_python__venv="$3"
     local _install_python__is_force="$4"
+
+    if ! u_check_version_format "$_install_python__ver"; then
+        echo "invalid version: '$_install_python__ver'"
+        return 1
+    fi
 
     echo "Installing python: $_install_python__ver"
     echo "Virtual environment name: $_install_python__venv"
@@ -565,9 +581,6 @@ u_check_go_version() {
             echo "Invalid go version: $_check_go_version__ver. Only 1.18+ is supported."
             return 1  # 3. 關鍵修正：使用 return 立即退出函式
         fi
-    else
-        echo "Failed to parse go version: '$_check_go_version__ver'"
-        return 1
     fi
 
     # 驗證通過
@@ -693,6 +706,11 @@ u_install_go() {
     
     local go_ver="$2"
     local is_force="$3"
+
+    if ! u_check_version_format "$go_ver"; then
+        echo "invalid version: '$go_ver'"
+        return 1
+    fi
 
     echo "Installing go $go_ver"
     
@@ -839,6 +857,11 @@ u_install_cmake() {
     local _install_cmake__is_link="$3"
     
     if [ -z "$_install_cmake__cwd" ]; then
+        return 1
+    fi
+
+    if ! u_check_version_format "$_install_cmake__ver"; then
+        echo "invalid version: '$_install_cmake__ver'"
         return 1
     fi
 
