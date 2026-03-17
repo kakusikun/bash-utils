@@ -84,7 +84,7 @@ u_get_latest_file() {
     u_glob_dir "$_get_latest_file__pattern" "$_get_latest_file__dir" _get_latest_file__target_files
 
     _get_latest_file__latest=""
-    for _get_latest_file__file in $_get_latest_file__target_files; do
+    for _get_latest_file__file in "${_get_latest_file__target_files[@]}"; do
         # 如果還沒有 latest，或者當前 file 比 latest 新 (-nt = newer than)
         if [[ -z "$_get_latest_file__latest" || "$_get_latest_file__file" -nt "$_get_latest_file__latest" ]]; then
             _get_latest_file__latest="$_get_latest_file__file"
