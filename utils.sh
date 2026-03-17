@@ -239,7 +239,9 @@ u_safe_delete() {
     # 3. 執行刪除
     mkdir -p /tmp/recycle
     rm -rf /tmp/recycle/"$_safe_delete__basename"
-    mv "$_safe_delete__target" /tmp/recycle
+    if [ -f "$_safe_delete__target" ] || [ -d "$_safe_delete__target" ]; then
+        mv "$_safe_delete__target" /tmp/recycle
+    fi
 }
 
 u_check_version_format() {
@@ -564,7 +566,9 @@ u_clean_python() {
     done
     
     for f in "$_clean_python__cwd"/activate*; do
-        unlink "$f"
+        if [ -L "$f" ]; then
+            unlink "$f"
+        fi
     done
 }
 
@@ -896,14 +900,14 @@ u_clean_cmake() {
         return 1
     fi
     
-    if ! u_check_cmake "$_clean_cmake__cwd"; then
-        return 0
-    fi
-
     if [ -L /usr/local/bin/cmake ]; then
         local _clean_cmake__real_path
         local _clean_cmake__real_parent="$_clean_cmake__cwd/.cache/cmake"
         _clean_cmake__real_path=$(readlink /usr/local/bin/cmake)
+
+        if [ ! -f "$_clean_cmake__real_parent" ]; then
+            return 0
+        fi
 
         if [[ "$_clean_cmake__real_path" == "$_clean_cmake__real_parent"/* ]]; then
             sudo unlink /usr/local/bin/cmake
