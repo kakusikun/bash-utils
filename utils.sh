@@ -2,6 +2,20 @@
 
 set -e
 
+__VERSION__="1.0.0"
+
+if [ -z "$CWD" ]; then
+	_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	CWD="$(cd "$_SCRIPT_DIR/../../" && pwd)"
+	export CWD
+fi
+
+export UV_INSTALL_DIR="$CWD/.uv_bin"
+export UV_PYTHON_INSTALL_DIR="$CWD/.python_interpreters"
+export UV_CACHE_DIR="$CWD/.uv_cache"
+export UV_PYTHON_BIN_DIR="$CWD/.python_interpreters"
+export UV="$CWD/.uv_bin/uv"
+
 [ -n "$DEBUG" ] && set -x
 
 u_print_commands() {
@@ -366,13 +380,8 @@ u_check_cmd() {
 }
 
 u_check_uv() {
-	local _check_uv__cwd="$1"
 
-	if [ -z "$_check_uv__cwd" ]; then
-		return 1
-	fi
-
-	if [ ! -f "$_check_uv__cwd/uv/uv" ]; then
+	if [ ! -f "$UV" ]; then
 		echo "uv is not found"
 		return 1
 	fi
@@ -381,69 +390,28 @@ u_check_uv() {
 }
 
 u_install_uv() {
-	local _install_uv__cwd="$1"
-
-	if [ -z "$_install_uv__cwd" ]; then
-		return 1
-	fi
-
-	local _install_uv__dst="$2"
-	local _install_uv__src="$3"
-
-	if [ -n "$_install_uv__dst" ]; then
-		_install_uv__dst=$(realpath "$_install_uv__dst" 2>/dev/null)
-	else
-		_install_uv__dst="$_install_uv__cwd"
-	fi
-
-	if [ -n "$_install_uv__src" ]; then
-		_install_uv__src=$(realpath "$_install_uv__src" 2>/dev/null)
-		if [ -f "$_install_uv__src"/uv ]; then
-			if [ -e "$_install_uv__dst"/uv ]; then
-				echo "$_install_uv__dst/uv is already exists"
-				return 1
-			fi
-
-			echo "link uv to $_install_uv__src"
-			ln -sf "$_install_uv__src" "$_install_uv__dst"/uv
-			return 0
-		else
-			echo "uv is not found in $_install_uv__src"
-			return 1
-		fi
-	fi
-
-	if ! u_check_uv "$_install_uv__dst"; then
-		echo "install uv to $_install_uv__dst"
+	if ! u_check_uv; then
+		echo "install uv to $UV"
 		u_apt_install curl
-		curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$_install_uv__dst/uv" UV_NO_MODIFY_PATH=1 sh
+		curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh
 	else
-		echo "uv is already installed at $_install_uv__dst/uv"
+		echo "uv is already installed at $UV"
 	fi
 
 	return 0
 }
 
 u_clean_uv() {
-	local _clean_uv__cwd="$1"
-
-	if [ -z "$_clean_uv__cwd" ]; then
-		return 1
-	fi
-
-	if ! u_check_uv "$_clean_uv__cwd"; then
+	if ! u_check_uv; then
 		return 0
 	fi
 
-	if [ -L "$_clean_uv__cwd/uv" ]; then
-		unlink "$_clean_uv__cwd/uv"
-	else
-		"$_clean_uv__cwd"/uv/uv cache clean
-		u_safe_delete "$("$_clean_uv__cwd"/uv/uv python dir)"
-		u_safe_delete "$("$_clean_uv__cwd"/uv/uv tool dir)"
-		u_safe_delete "$_clean_uv__cwd"/uv
-	fi
-
+	"$UV" cache clean
+	u_safe_delete "$("$UV" python dir)"
+	u_safe_delete "$("$UV" tool dir)"
+	u_safe_delete UV_INSTALL_DIR
+	u_safe_delete UV_PYTHON_INSTALL_DIR
+	u_safe_delete UV_CACHE_DIR
 	return 0
 }
 
@@ -469,15 +437,9 @@ u_check_py_version() {
 }
 
 u_check_python() {
-	local _check_python__cwd="$1"
-
-	if [ -z "$_check_python__cwd" ]; then
-		return 1
-	fi
-
 	local _check_python__uv_python
 	local _check_python__sys_python
-	_check_python__uv_python=$("$_check_python__cwd"/uv/uv python find 2>/dev/null)
+	_check_python__uv_python=$("$UV" python find 2>/dev/null)
 	_check_python__sys_python=$(which python 2>/dev/null)
 
 	# 確保兩個變數都有值
@@ -495,15 +457,9 @@ u_check_python() {
 }
 
 u_check_pymodule() {
-	local _check_pymodule__cwd="$1"
-
-	if [ -z "$_check_pymodule__cwd" ]; then
-		return 1
-	fi
-
-	local _check_pymodule__module="$2"
-	if u_check_python "$_check_pymodule__cwd"; then
-		if "$_check_pymodule__cwd"/uv/uv pip show "$_check_pymodule__module" >/dev/null; then
+	local _check_pymodule__module="$1"
+	if u_check_python; then
+		if "$UV" pip show "$_check_pymodule__module" >/dev/null; then
 			return 0
 		else
 			return 1
@@ -514,15 +470,7 @@ u_check_pymodule() {
 }
 
 u_install_python() {
-	local _install_python__cwd="$1"
-
-	if [ -z "$_install_python__cwd" ]; then
-		return 1
-	fi
-
-	local _install_python__ver="$2"
-	local _install_python__venv="$3"
-	local _install_python__is_force="$4"
+	local _install_python__ver="$1"
 
 	if ! u_check_version_format "$_install_python__ver"; then
 		echo "invalid version: '$_install_python__ver'"
@@ -530,62 +478,29 @@ u_install_python() {
 	fi
 
 	echo "Installing python: $_install_python__ver"
-	echo "Virtual environment name: $_install_python__venv"
 
 	if ! u_check_py_version "$_install_python__ver"; then
 		exit 1
 	fi
 
-	if ! u_check_uv "$_install_python__cwd"; then
+	if ! u_check_uv; then
 		exit 1
 	fi
 
-	"$_install_python__cwd"/uv/uv python install -i "$_install_python__cwd"/uv "$_install_python__ver"
+	"$UV" python install "$_install_python__ver"
 
-	if [ "$_install_python__is_force" -eq 1 ] && [ -d "$_install_python__cwd/$.venv_$_install_python__venv-$_install_python__ver" ]; then
-		local _install_python__path
-		_install_python__path="$_install_python__cwd/.venv_$_install_python__venv-$_install_python__ver"
-		u_safe_delete "$_install_python__path"
+	if [ ! -d "$CWD/.venv" ]; then
+		"$UV" venv "$CWD/.venv" --python "$_install_python__ver"
 	fi
 
-	if [ ! -d "$_install_python__cwd/.venv_$_install_python__venv-$_install_python__ver" ]; then
-		local _install_python__arch
-		local _install_python__osname
-		_install_python__arch=$(uname -m)
-		_install_python__osname=$(uname -s | tr '[:upper:]' '[:lower:]')
-		"$_install_python__cwd"/uv/uv venv -p "$_install_python__cwd/uv/cpython-$_install_python__ver-$_install_python__osname-$_install_python__arch-gnu/bin/python" "$_install_python__cwd/.venv_$_install_python__venv-$_install_python__ver"
+	if [ -L "$CWD/activate_$_install_python__ver" ]; then
+		unlink "$CWD/activate_$_install_python__ver"
 	fi
 
-	if [ -L "$_install_python__cwd/activate_$_install_python__venv-$_install_python__ver" ]; then
-		unlink "$_install_python__cwd/activate_$_install_python__venv-$_install_python__ver"
-	fi
-
-	ln -s "$_install_python__cwd/.venv_$_install_python__venv-$_install_python__ver"/bin/activate "$_install_python__cwd/activate_$_install_python__venv-$_install_python__ver"
-	echo "source activate_$_install_python__venv-$_install_python__ver to use python"
+	ln -s "$CWD"/.venv/bin/activate "$CWD/activate_$_install_python__ver"
+	echo "source activate_$_install_python__ver to use python"
 
 	return 0
-}
-
-u_clean_python() {
-	local _clean_python__cwd="$1"
-
-	if [ -z "$_clean_python__cwd" ]; then
-		return 1
-	fi
-
-	if ! u_check_python "$_clean_python__cwd"; then
-		return 0
-	fi
-
-	for f in "$_clean_python__cwd"/.venv*; do
-		u_safe_delete "$f"
-	done
-
-	for f in "$_clean_python__cwd"/activate*; do
-		if [ -L "$f" ]; then
-			unlink "$f"
-		fi
-	done
 }
 
 u_check_go_version() {
@@ -608,20 +523,14 @@ u_check_go_version() {
 }
 
 u_check_go() {
-	local _check_go__cwd="$1"
-
-	if [ -z "$_check_go__cwd" ]; then
-		return 1
-	fi
-
-	if [ ! -d "$_check_go__cwd/.goenv/versions" ]; then
+	if [ ! -d "$CWD/.goenv/versions" ]; then
 		echo "go is not found"
 		return 1
 	fi
 
 	local _check_go__dir
 	local _check_go__ver
-	u_get_latest_file "$_check_go__cwd/.goenv/versions/*.*.*" _check_go__dir
+	u_get_latest_file "$CWD/.goenv/versions/*.*.*" _check_go__dir
 	u_get_base_name "$_check_go__dir" _check_go__ver
 
 	if ! u_check_go_version "$_check_go__ver"; then
@@ -633,39 +542,29 @@ u_check_go() {
 }
 
 u_get_go() {
-	local _get_go__cwd="$1"
-	local -n _get_go__out_var="$2"
+	local -n _get_go__out_var="$1"
 
-	if [ -z "$_get_go__cwd" ]; then
-		return 1
-	fi
-
-	if ! u_check_go "$_get_go__cwd"; then
+	if ! u_check_go; then
 		return 1
 	fi
 
 	local _get_go__go_ver_path
-	u_get_latest_file "$_get_go__cwd/.goenv/versions/*.*.*" _get_go__go_ver_path
+	u_get_latest_file "$CWD/.goenv/versions/*.*.*" _get_go__go_ver_path
 
 	_get_go__out_var=$_get_go__go_ver_path/bin/go
 }
 
 u_get_gobin() {
-	local _get_gobin__cwd="$1"
-	local _get_gobin__binname="$2"
-	local -n _get_gobin__out_var="$3"
+	local _get_gobin__binname="$1"
+	local -n _get_gobin__out_var="$2"
 
-	if [ -z "$_get_gobin__cwd" ]; then
-		return 1
-	fi
-
-	if ! u_check_go "$_get_gobin__cwd"; then
+	if ! u_check_go; then
 		return 1
 	fi
 
 	local _get_gobin__gobin
 	local _get_gobin__gopath
-	u_get_go "$_get_gobin__cwd" _get_gobin__gobin
+	u_get_go _get_gobin__gobin
 	_get_gobin__gopath=$($_get_gobin__gobin env GOPATH)
 
 	if [ ! -f "$_get_gobin__gopath"/bin/"$_get_gobin__binname" ]; then
@@ -676,16 +575,11 @@ u_get_gobin() {
 }
 
 u_check_gopkg() {
-	local _check_gopkg__cwd="$1"
-	local _check_gopkg__pkgname="$2"
-
-	if [ -z "$_check_gopkg__cwd" ]; then
-		return 1
-	fi
+	local _check_gopkg__pkgname="$1"
 
 	local _check_gopkg__gobin
 	local _check_gopkg__gopath
-	u_get_go "$_check_gopkg__cwd" _check_gopkg__gobin
+	u_get_go _check_gopkg__gobin
 	_check_gopkg__gopath=$($_check_gopkg__gobin env GOPATH)
 
 	if [ ! -f "$_check_gopkg__gopath"/pkg/mod/"$_check_gopkg__pkgname" ]; then
@@ -696,16 +590,11 @@ u_check_gopkg() {
 }
 
 u_check_gobin() {
-	local _check_gobin__cwd="$1"
-	local _check_gobin__binname="$2"
-
-	if [ -z "$_check_gobin__cwd" ]; then
-		return 1
-	fi
+	local _check_gobin__binname="$1"
 
 	local _check_gobin__gobin
 	local _check_gobin__gopath
-	u_get_go "$_check_gobin__cwd" _check_gobin__gobin
+	u_get_go _check_gobin__gobin
 	_check_gobin__gopath=$($_check_gobin__gobin env GOPATH)
 
 	if [ ! -f "$_check_gobin__gopath"/bin/"$_check_gobin__binname" ]; then
@@ -716,14 +605,8 @@ u_check_gobin() {
 }
 
 u_install_go() {
-	local _install_go__cwd="$1"
-
-	if [ -z "$_install_go__cwd" ]; then
-		return 1
-	fi
-
-	local go_ver="$2"
-	local is_force="$3"
+	local go_ver="$1"
+	local is_force="$2"
 
 	if ! u_check_version_format "$go_ver"; then
 		echo "invalid version: '$go_ver'"
@@ -736,52 +619,40 @@ u_install_go() {
 		exit 1
 	fi
 
-	if [ "$is_force" -eq 1 ] && [ -d "$_install_go__cwd/.goenv/versions/$go_ver" ]; then
-		GOENV_ROOT="$_install_go__cwd"/.goenv "$_install_go__cwd"/.goenv/bin/goenv uninstall "$go_ver"
+	if [ "$is_force" -eq 1 ] && [ -d "$CWD/.goenv/versions/$go_ver" ]; then
+		GOENV_ROOT="$CWD"/.goenv "$CWD"/.goenv/bin/goenv uninstall "$go_ver"
 	fi
 
-	if [ ! -d "$_install_go__cwd/.goenv/versions/$go_ver" ]; then
-		u_git_clone https://github.com/syndbg/goenv.git 2.2.34 "$_install_go__cwd"/.goenv
-		GOENV_ROOT="$_install_go__cwd"/.goenv "$_install_go__cwd"/.goenv/bin/goenv install "$go_ver"
+	if [ ! -d "$CWD/.goenv/versions/$go_ver" ]; then
+		u_git_clone https://github.com/syndbg/goenv.git 2.2.34 "$CWD"/.goenv
+		GOENV_ROOT="$CWD"/.goenv "$CWD"/.goenv/bin/goenv install "$go_ver"
 	fi
 
-	if [ -L "$_install_go__cwd/activate_go-$go_ver" ]; then
-		unlink "$_install_go__cwd/activate_go-$go_ver"
+	if [ -L "$CWD/activate_go-$go_ver" ]; then
+		unlink "$CWD/activate_go-$go_ver"
 	fi
 
-	echo "PATH=$_install_go__cwd/.goenv/versions/$go_ver/bin:\$PATH" >"$_install_go__cwd/activate_go-$go_ver"
+	echo "PATH=$CWD/.goenv/versions/$go_ver/bin:\$PATH" >"$CWD/activate_go-$go_ver"
 
 	echo "source activate_go-$go_ver to use go"
 
 }
 
 u_install_gopkg() {
-	local _install_gopkg__cwd="$1"
-	local _install_gopkg__url="$2"
-
-	if [ -z "$_install_gopkg__cwd" ]; then
-		return 1
-	fi
-
+	local _install_gopkg__url="$1"
 	local gobin
-	u_get_go "$_install_gopkg__cwd" gobin
+	u_get_go gobin
 
 	"$gobin" install "$_install_gopkg__url"
 }
 
 u_build_golib() {
-	local _build_golib__cwd="$1"
-	local _build_golib__dst="$2"
-
-	if [ -z "$_build_golib__cwd" ]; then
-		return 1
-	fi
-
+	local _build_golib__dst="$1"
 	local gobin
-	u_get_go "$_build_golib__cwd" gobin
+	u_get_go gobin
 
 	if ! (
-		cd "$_build_golib__cwd" &&
+		cd "$CWD" &&
 			"$gobin" build -buildvcs=false -o "$_build_golib__dst"
 	); then
 		return 1
@@ -789,51 +660,45 @@ u_build_golib() {
 }
 
 u_clean_go() {
-	local _clean_go__cwd="$1"
-
-	if [ -z "$_clean_go__cwd" ]; then
-		return 1
-	fi
-
-	if ! u_check_go "$_clean_go__cwd"; then
+	if ! u_check_go; then
 		return 0
 	fi
 
 	local _clean_go__gobin
 	local _clean_go__gopath
-	u_get_go "$_clean_go__cwd" _clean_go__gobin
+	u_get_go _clean_go__gobin
 	_clean_go__gopath=$($_clean_go__gobin env GOPATH)
 
 	u_safe_delete "$_clean_go__gopath"
 
-	u_safe_delete "$_clean_go__cwd"/.goenv
+	u_safe_delete "$CWD"/.goenv
 
-	for f in "$_clean_go__cwd"/activate*; do
+	for f in "$CWD"/activate*; do
 		unlink "$f"
 	done
 
 }
 
 u_install_project() {
-	local _install_project__cwd="$1"
-
-	if [ -z "$_install_project__cwd" ]; then
-		return 1
-	fi
-
 	# pip install cuml-cu11==21.12.02 --extra-index-url=https://pypi.nvidia.com
-	"$_install_project__cwd"/uv/uv pip install -e "$_install_project__cwd"
+	local _install_project__is_local="$1"
+	if [ "$_install_project__is_local" -eq 1 ]; then
+		"$UV" sync --frozen --offline
+	else
+		"$UV" sync
+	fi
 }
 
 u_install_package() {
-	local _install_package__cwd="$1"
-	local _install_package__pkgname="$2"
+	local _install_package__pkgname="$1"
+	local _install_package__is_local="$2"
 
-	if [ -z "$_install_package__cwd" ]; then
-		return 1
+	if [ "$_install_package__is_local" -eq 1 ]; then
+		"$UV" pip install "$_install_package__pkgname" --offline
+	else
+		"$UV" pip install "$_install_package__pkgname" --dry-run
 	fi
 
-	"$_install_package__cwd"/uv/uv pip install "$_install_package__pkgname"
 }
 
 u_install_pybind() {
@@ -869,53 +734,42 @@ u_check_cmake() {
 }
 
 u_install_cmake() {
-	local _install_cmake__cwd="$1"
-	local _install_cmake__ver="$2"
-	local _install_cmake__is_link="$3"
-
-	if [ -z "$_install_cmake__cwd" ]; then
-		return 1
-	fi
+	local _install_cmake__ver="$1"
+	local _install_cmake__is_link="$2"
 
 	if ! u_check_version_format "$_install_cmake__ver"; then
 		echo "invalid version: '$_install_cmake__ver'"
 		return 1
 	fi
 
-	mkdir -p "$_install_cmake__cwd/.cache"
+	mkdir -p "$CWD/.cache"
 
 	if ! u_check_cmake "$_install_cmake__ver"; then
 		echo "Installing cmake $_install_cmake__ver"
 		local _install_cmake__arch
 		_install_cmake__arch=$(uname -m)
-		if [ ! -f "$_install_cmake__cwd/.cache/cmake-$_install_cmake__ver-linux-$_install_cmake__arch.sh" ]; then
+		if [ ! -f "$CWD/.cache/cmake-$_install_cmake__ver-linux-$_install_cmake__arch.sh" ]; then
 			echo "Downloading cmake-$_install_cmake__ver-linux-$_install_cmake__arch.sh"
-			wget -P "$_install_cmake__cwd/.cache" "https://github.com/Kitware/CMake/releases/download/v$_install_cmake__ver/cmake-$_install_cmake__ver-linux-$_install_cmake__arch.sh"
+			wget -P "$CWD/.cache" "https://github.com/Kitware/CMake/releases/download/v$_install_cmake__ver/cmake-$_install_cmake__ver-linux-$_install_cmake__arch.sh"
 		fi
-		if [ ! -d "$_install_cmake__cwd/.cache/cmake-$_install_cmake__ver-linux-$_install_cmake__arch" ]; then
-			cd "$_install_cmake__cwd/.cache" && bash "cmake-$_install_cmake__ver-linux-$_install_cmake__arch.sh" --include-subdir --skip-license && cd -
+		if [ ! -d "$CWD/.cache/cmake-$_install_cmake__ver-linux-$_install_cmake__arch" ]; then
+			cd "$CWD/.cache" && bash "cmake-$_install_cmake__ver-linux-$_install_cmake__arch.sh" --include-subdir --skip-license && cd -
 		fi
 		if [ "$_install_cmake__is_link" -eq 1 ]; then
 			if [ -L /usr/local/bin/cmake ]; then
 				sudo unlink /usr/local/bin/cmake
 				echo "unlink /usr/local/bin/cmake"
 			fi
-			sudo ln -s "$_install_cmake__cwd/.cache/cmake-$_install_cmake__ver-linux-$_install_cmake__arch/bin/cmake" /usr/local/bin/cmake
+			sudo ln -s "$CWD/.cache/cmake-$_install_cmake__ver-linux-$_install_cmake__arch/bin/cmake" /usr/local/bin/cmake
 			echo "create symlink /usr/local/bin/cmake"
 		fi
 	fi
 }
 
 u_clean_cmake() {
-	local _clean_cmake__cwd="$1"
-
-	if [ -z "$_clean_cmake__cwd" ]; then
-		return 1
-	fi
-
 	if [ -L /usr/local/bin/cmake ]; then
 		local _clean_cmake__real_path
-		local _clean_cmake__real_parent="$_clean_cmake__cwd/.cache/cmake"
+		local _clean_cmake__real_parent="$CWD/.cache/cmake"
 		_clean_cmake__real_path=$(readlink /usr/local/bin/cmake)
 
 		if [ ! -f "$_clean_cmake__real_parent" ]; then
@@ -928,7 +782,7 @@ u_clean_cmake() {
 		fi
 	fi
 
-	for f in "$_clean_cmake__cwd"/.cache/cmake*; do
+	for f in "$CWD"/.cache/cmake*; do
 		u_safe_delete "$f"
 	done
 
@@ -936,26 +790,15 @@ u_clean_cmake() {
 }
 
 u_build_wheel() {
-	local _build_wheel__cwd="$1"
-
-	if [ -z "$_build_wheel__cwd" ]; then
-		return 1
-	fi
-
-	"$_build_wheel__cwd"/uv/uv build --wheel
+	"$UV" build --wheel
 }
 
 u_build_lib() {
-	local _build_lib__cwd="$1"
-	local _build_lib__src="$2"
-	local _build_lib__output="$3"
-
-	if [ -z "$_build_lib__cwd" ]; then
-		return 1
-	fi
+	local _build_lib__src="$1"
+	local _build_lib__output="$2"
 
 	if [ ! -x "$(which nuitka)" ]; then
-		"$_build_lib__cwd"/uv/uv pip install nuitka
+		"$UV" pip install nuitka
 	fi
 
 	nuitka --include-package=mrtabn --output-dir="$_build_lib__output" --module "$_build_lib__src"
