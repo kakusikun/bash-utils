@@ -2,12 +2,17 @@
 
 set -e
 
-__VERSION__="1.0.0"
+__VERSION__="1.1.0"
 
 if [ -z "$CWD" ]; then
 	_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 	CWD="$(cd "$_SCRIPT_DIR/../../" && pwd)"
 	export CWD
+fi
+
+if [ -f "$CWD"/.venv/bin/activate ]; then
+	# shellcheck source=/dev/null
+	source "$CWD"/.venv/bin/activate
 fi
 
 export UV_INSTALL_DIR="$CWD/.uv_bin"
@@ -493,13 +498,6 @@ u_install_python() {
 		"$UV" venv "$CWD/.venv" --python "$_install_python__ver"
 	fi
 
-	if [ -L "$CWD/activate_$_install_python__ver" ]; then
-		unlink "$CWD/activate_$_install_python__ver"
-	fi
-
-	ln -s "$CWD"/.venv/bin/activate "$CWD/activate_$_install_python__ver"
-	echo "source activate_$_install_python__ver to use python"
-
 	return 0
 }
 
@@ -619,7 +617,7 @@ u_install_go() {
 		exit 1
 	fi
 
-	if [ "$is_force" -eq 1 ] && [ -d "$CWD/.goenv/versions/$go_ver" ]; then
+	if [ "$is_force" == "1" ] && [ -d "$CWD/.goenv/versions/$go_ver" ]; then
 		GOENV_ROOT="$CWD"/.goenv "$CWD"/.goenv/bin/goenv uninstall "$go_ver"
 	fi
 
@@ -681,22 +679,22 @@ u_clean_go() {
 
 u_install_project() {
 	# pip install cuml-cu11==21.12.02 --extra-index-url=https://pypi.nvidia.com
-	local _install_project__is_local="$1"
-	if [ "$_install_project__is_local" -eq 1 ]; then
-		"$UV" sync --frozen --offline
+	local _install_project__is_cache="$1"
+	if [ "$_install_project__is_cache" == "1" ]; then
+		"$UV" sync --project "$CWD" --frozen --offline 
 	else
-		"$UV" sync
+		"$UV" sync --project "$CWD"
 	fi
 }
 
 u_install_package() {
 	local _install_package__pkgname="$1"
-	local _install_package__is_local="$2"
+	local _install_package__is_cache="$2"
 
-	if [ "$_install_package__is_local" -eq 1 ]; then
+	if [ "$_install_package__is_cache" == "1" ]; then
 		"$UV" pip install "$_install_package__pkgname" --offline
 	else
-		"$UV" pip install "$_install_package__pkgname" --dry-run
+		"$UV" pip install "$_install_package__pkgname"
 	fi
 
 }
@@ -755,7 +753,7 @@ u_install_cmake() {
 		if [ ! -d "$CWD/.cache/cmake-$_install_cmake__ver-linux-$_install_cmake__arch" ]; then
 			cd "$CWD/.cache" && bash "cmake-$_install_cmake__ver-linux-$_install_cmake__arch.sh" --include-subdir --skip-license && cd -
 		fi
-		if [ "$_install_cmake__is_link" -eq 1 ]; then
+		if [ "$_install_cmake__is_link" == "1" ]; then
 			if [ -L /usr/local/bin/cmake ]; then
 				sudo unlink /usr/local/bin/cmake
 				echo "unlink /usr/local/bin/cmake"
