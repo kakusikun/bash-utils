@@ -407,16 +407,15 @@ u_install_uv() {
 }
 
 u_clean_uv() {
-	if ! u_check_uv; then
-		return 0
+	if u_check_uv; then
+		"$UV" cache clean || true
+		u_safe_delete "$("$UV" python dir)"
+		u_safe_delete "$("$UV" tool dir)"
 	fi
 
-	"$UV" cache clean
-	u_safe_delete "$("$UV" python dir)"
-	u_safe_delete "$("$UV" tool dir)"
-	u_safe_delete UV_INSTALL_DIR
-	u_safe_delete UV_PYTHON_INSTALL_DIR
-	u_safe_delete UV_CACHE_DIR
+	u_safe_delete "$UV_INSTALL_DIR"
+	u_safe_delete "$UV_PYTHON_INSTALL_DIR"
+	u_safe_delete "$UV_CACHE_DIR"
 	return 0
 }
 
@@ -499,6 +498,10 @@ u_install_python() {
 	fi
 
 	return 0
+}
+
+u_clean_python() {
+	u_safe_delete "$CWD/.venv"
 }
 
 u_check_go_version() {
@@ -681,7 +684,7 @@ u_install_project() {
 	# pip install cuml-cu11==21.12.02 --extra-index-url=https://pypi.nvidia.com
 	local _install_project__is_cache="$1"
 	if [ "$_install_project__is_cache" == "1" ]; then
-		"$UV" sync --project "$CWD" --frozen --offline 
+		"$UV" sync --project "$CWD" --frozen --offline
 	else
 		"$UV" sync --project "$CWD"
 	fi
