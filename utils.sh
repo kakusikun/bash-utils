@@ -2,7 +2,7 @@
 
 set -e
 
-__VERSION__="1.1.0"
+__VERSION__="1.2.0"
 
 if [ -z "$CWD" ]; then
 	_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -803,4 +803,39 @@ u_build_lib() {
 	fi
 
 	nuitka --include-package=mrtabn --output-dir="$_build_lib__output" --module "$_build_lib__src"
+}
+
+u_get_json_value() {
+	local _get_json_value__json_file="$1"
+	local -n _get_json_value__path_arr="$2"
+	local -n _get_json_value__result_ref="$3"
+
+	# 檢查檔案是否存在
+	if [ ! -f "$_get_json_value__json_file" ]; then
+		echo "錯誤：JSON 檔案不存在：$_get_json_value__json_file" >&2
+		return 1
+	fi
+
+	# 檢查 jq 是否可用
+	if ! command -v jq &>/dev/null; then
+		echo "錯誤：請先安裝 jq" >&2
+		return 1
+	fi
+
+	# 將陣列轉換為 jq 的路徑格式，例如: .["lidar"]["ip_address"]
+	local _get_json_value__jq_path="."
+	for _get_json_value__key in "${_get_json_value__path_arr[@]}"; do
+		_get_json_value__jq_path+='["'$_get_json_value__key'"]'
+	done
+
+	# 執行 jq 獲取數值 (-r 輸出 raw string，去掉雙引號)
+	local _get_json_value__value
+	_get_json_value__value=$(jq -r "$_get_json_value__jq_path" "$_get_json_value__json_file" 2>/dev/null)
+
+	# 檢查回傳值是否為 null 或讀取失敗
+	if [[ "$_get_json_value__value" == "null" || -z "$_get_json_value__value" ]]; then
+		_get_json_value__result_ref="NOT_FOUND"
+	else
+		_get_json_value__result_ref="$_get_json_value__value"
+	fi
 }
