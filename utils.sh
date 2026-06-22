@@ -2,7 +2,7 @@
 
 set -e
 
-__VERSION__="1.2.0"
+__VERSION__="1.2.1"
 
 if [ -z "$CWD" ]; then
 	_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -791,7 +791,14 @@ u_clean_cmake() {
 }
 
 u_build_wheel() {
-	"$UV" build --wheel
+	local _build_wheel__output="$1"
+
+	if [ -z "$_build_wheel__output" ]; then
+		"$UV" build --wheel
+	else
+		"$UV" build --wheel -o "$_build_wheel__output"
+	fi
+
 }
 
 u_build_lib() {
