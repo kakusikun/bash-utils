@@ -2,7 +2,7 @@
 
 set -e
 
-__VERSION__="1.2.1"
+__VERSION__="1.2.2"
 
 if [ -z "$CWD" ]; then
 	_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -841,7 +841,8 @@ u_get_json_value() {
 
 	# 檢查回傳值是否為 null 或讀取失敗
 	if [[ "$_get_json_value__value" == "null" || -z "$_get_json_value__value" ]]; then
-		_get_json_value__result_ref="NOT_FOUND"
+		echo "錯誤：讀取 key $_get_json_value__path_arr 失敗" >&2
+		return 1
 	else
 		_get_json_value__result_ref="$_get_json_value__value"
 	fi
