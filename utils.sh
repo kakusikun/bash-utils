@@ -2,7 +2,7 @@
 
 set -e
 
-__VERSION__="1.2.2"
+__VERSION__="1.2.3"
 
 if [ -z "$CWD" ]; then
 	_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
