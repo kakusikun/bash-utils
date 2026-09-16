@@ -53,6 +53,72 @@ u_glob_dir() {
 	mapfile -d '' _glob_dir__out_arr < <(find "$_glob_dir__dir" -maxdepth 1 -name "$_glob_dir__name" -print0)
 }
 
+u_copy_clean_tree() {
+	local _copy_clean_tree__source="$1"
+	local _copy_clean_tree__destination="$2"
+	local -a _copy_clean_tree__artifacts=()
+	local _copy_clean_tree__artifact
+
+	if [ ! -d "$_copy_clean_tree__source" ]; then
+		echo "Source directory does not exist: $_copy_clean_tree__source" >&2
+		return 1
+	fi
+
+	if [ -e "$_copy_clean_tree__destination" ]; then
+		echo "Destination already exists: $_copy_clean_tree__destination" >&2
+		return 1
+	fi
+
+	mkdir -p "$(dirname "$_copy_clean_tree__destination")"
+	cp -r "$_copy_clean_tree__source" "$_copy_clean_tree__destination"
+
+	mapfile -d '' _copy_clean_tree__artifacts < <(
+		find "$_copy_clean_tree__destination" \
+			\( \
+				\( -type d \( \
+					-name "__pycache__" \
+					-o -name ".pytest_cache" \
+					-o -name ".mypy_cache" \
+					-o -name ".ruff_cache" \
+				\) \) \
+				-o \( -type f \( \
+					-name "*.pyc" \
+					-o -name "*.pyo" \
+					-o -name ".coverage" \
+				\) \) \
+			\) \
+			-print0
+	)
+
+	for _copy_clean_tree__artifact in "${_copy_clean_tree__artifacts[@]}"; do
+		rm -rf "$_copy_clean_tree__artifact"
+	done
+
+	mapfile -d '' _copy_clean_tree__artifacts < <(
+		find "$_copy_clean_tree__destination" \
+			\( \
+				\( -type d \( \
+					-name "__pycache__" \
+					-o -name ".pytest_cache" \
+					-o -name ".mypy_cache" \
+					-o -name ".ruff_cache" \
+				\) \) \
+				-o \( -type f \( \
+					-name "*.pyc" \
+					-o -name "*.pyo" \
+					-o -name ".coverage" \
+				\) \) \
+			\) \
+			-print0
+	)
+
+	if [ "${#_copy_clean_tree__artifacts[@]}" -gt 0 ]; then
+		echo "Release artifact cleanup failed:" >&2
+		printf '  %s\n' "${_copy_clean_tree__artifacts[@]}" >&2
+		return 1
+	fi
+}
+
 u_get_base_name() {
 	local _get_base_name__input="$1"
 	local -n _get_base_name__out_var="$2"
