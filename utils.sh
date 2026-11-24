@@ -2,7 +2,7 @@
 
 set -e
 
-__VERSION__="1.2.2"
+__VERSION__="1.3.0"
 
 if [ -z "$CWD" ]; then
 	_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -846,4 +846,66 @@ u_get_json_value() {
 	else
 		_get_json_value__result_ref="$_get_json_value__value"
 	fi
+}
+
+# ------------------------------------------------------------------ release helpers (1.3.0)
+
+# u_confirm_overwrite <is_yes> <path>...
+# 任一 path 已存在時詢問是否覆蓋（10 秒逾時視為否）；is_yes=1 時不詢問。
+# 回傳 0 表示可以覆蓋（或都不存在），1 表示使用者拒絕。不會刪除任何東西。
+u_confirm_overwrite() {
+	local _confirm_overwrite__is_yes="$1"
+	shift
+	local _confirm_overwrite__p
+	local _confirm_overwrite__exists=()
+	for _confirm_overwrite__p in "$@"; do
+		[ -e "$_confirm_overwrite__p" ] && _confirm_overwrite__exists+=("$_confirm_overwrite__p")
+	done
+	[ ${#_confirm_overwrite__exists[@]} -eq 0 ] && return 0
+	[ "$_confirm_overwrite__is_yes" = "1" ] && return 0
+
+	local _confirm_overwrite__input=""
+	read -t 10 -n 1 -s -r -p "${_confirm_overwrite__exists[*]} 已存在，覆蓋？[y/n]" _confirm_overwrite__input || true
+	echo ""
+	[ "$_confirm_overwrite__input" = "y" ]
+}
+
+# u_get_project_version <pyproject.toml> <out_var>
+# 讀取 [project] 的 version = "x.y.z"。
+u_get_project_version() {
+	local _get_project_version__file="$1"
+	local -n _get_project_version__out="$2"
+	local _get_project_version__ver
+	_get_project_version__ver=$(grep -m1 -oP '^version\s*=\s*"\K[^"]+' "$_get_project_version__file" 2>/dev/null || true)
+	if [ -z "$_get_project_version__ver" ]; then
+		echo "錯誤：無法從 $_get_project_version__file 讀取 version" >&2
+		return 1
+	fi
+	_get_project_version__out="$_get_project_version__ver"
+}
+
+# u_offline_run <mode_var> <cmd>...
+# 在沒有網路的環境執行命令，回傳該命令的結束碼。
+#   - 支援無特權 network namespace（unshare -rn）時：完全斷網，mode=offline-namespace
+#   - 否則退回只設 UV_OFFLINE=1：mode=uv-offline（只保證 uv 不連網，驗證強度較弱）
+u_offline_run() {
+	local -n _offline_run__mode="$1"
+	shift
+	if command -v unshare >/dev/null 2>&1 && unshare -rn true 2>/dev/null; then
+		_offline_run__mode="offline-namespace"
+		unshare -rn env UV_OFFLINE=1 "$@"
+	else
+		_offline_run__mode="uv-offline"
+		env UV_OFFLINE=1 "$@"
+	fi
+}
+
+# u_fix_python_links <python_install_dir>
+# uv python install 會在安裝目錄頂層留下指向絕對路徑的連結（minor 版本連結、bin 連結）
+# 與暫存檔；目錄搬移後這些連結會失效。移除之，讓目錄可以搬到任何位置使用。
+u_fix_python_links() {
+	local _fix_python_links__dir="$1"
+	[ -d "$_fix_python_links__dir" ] || return 0
+	find "$_fix_python_links__dir" -maxdepth 1 -type l -delete
+	rm -rf "$_fix_python_links__dir/.temp" "$_fix_python_links__dir/.lock"
 }
