@@ -2,7 +2,7 @@
 
 set -e
 
-__VERSION__="1.3.0"
+__VERSION__="1.4.0"
 
 if [ -z "$CWD" ]; then
 	_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -179,11 +179,16 @@ u_get_latest_file() {
 	_get_latest_file__out_var=$_get_latest_file__latest
 }
 
+# 解析命令列，結果放在全域的 _parse_arguments__ARGS／OPTS／FLAGS，
+# 之後以 u_get_argument、u_get_option、u_has_flag 取值。
+# 同時清空參數摘要的紀錄（見 u_print_options）。
 u_parse_arguments() {
 	# 建議加上 -g (global) 確保變數在函數外可用，視你的需求而定
 	declare -Ag _parse_arguments__OPTS
+	_parse_arguments__OPTS=() # 重新解析時清掉上一次的選項
 	_parse_arguments__ARGS=()
 	_parse_arguments__FLAGS=()
+	u_reset_options
 
 	# 使用 while 迴圈配合 $# (剩餘參數個數) 是處理 shift 的標準做法
 	while [ $# -gt 0 ]; do
@@ -211,7 +216,7 @@ u_parse_arguments() {
 
 			# 你的原始邏輯：嚴格禁止參數出現在 Option 之後
 			if [ ${#_parse_arguments__FLAGS[@]} -ne 0 ] || [ ${#_parse_arguments__OPTS[@]} -ne 0 ]; then
-				echo "Error: Positional argument '$_parse_arguments__key' found after options/flags." >&2
+				echo "錯誤：引數 '$_parse_arguments__key' 必須放在所有選項與旗標之前" >&2
 				# print_commands 1  # 假設你有這個函數
 				return 1
 			fi
@@ -222,47 +227,66 @@ u_parse_arguments() {
 	done
 }
 
+# u_get_argument <index> <default> <說明> <輸出變數>
+#   取第 index 個位置引數（從 0 起算）；沒給時用 default，default 也是空的就報錯結束。
+#   取到的值會記入參數摘要（見 u_print_options）。
 u_get_argument() {
 	local _get_argument__index="$1"
 	local _get_argument__default_val="$2"
 	local __get_argument__doc="$3"
 	local -n _get_argument__out_var="$4"
+	local _get_argument__label="第 $((_get_argument__index + 1)) 個引數"
 
 	# 1. 檢查 key1 是否存在且有值
 	if [ -n "${_parse_arguments__ARGS[$_get_argument__index]}" ]; then
 		_get_argument__out_var="${_parse_arguments__ARGS[$_get_argument__index]}"
+		_u_options__record "$_get_argument__label" "$__get_argument__doc" "$_get_argument__out_var" "指定"
 		return 0
 	fi
 
 	# 3. 若都找不到，檢查參數數量是否大於等於 3 (代表有傳入 default_val)
 	if [ -n "$_get_argument__default_val" ]; then
-		echo "use default value for argument '$_get_argument__index': $_get_argument__default_val" >&2
+		echo "$_get_argument__label 未指定，使用預設值：$_get_argument__default_val" >&2
 		_get_argument__out_var="$_get_argument__default_val"
+		_u_options__record "$_get_argument__label" "$__get_argument__doc" "$_get_argument__out_var" "預設"
 		return 0
 	fi
 
 	# 4. 若沒有預設值，報錯並終止 script
-	echo "missing argument. '$_get_argument__index', $__get_argument__doc" >&2
+	echo "錯誤：缺少$_get_argument__label：$__get_argument__doc；加上 --help 查看用法" >&2
 	exit 1
 
 }
 
+# u_has_flag <--flag> <輸出變數> [說明]
+#   有給 --flag 時輸出 1，否則 0。
+#   有傳說明時才記入參數摘要（見 u_print_options），所以 --help 這類檢查不會出現在摘要裡。
 u_has_flag() {
 	local -n _has_flag__out_var="$2"
-
-	if [ ${#_parse_arguments__FLAGS[@]} -eq 0 ]; then
-		_has_flag__out_var=0
-		return 0
-	fi
-
-	if echo "${_parse_arguments__FLAGS[@]}" | grep -q "\<${1:2}\>"; then
-		_has_flag__out_var=1
-		return 0
-	fi
+	local _has_flag__doc="${3-}"
 
 	_has_flag__out_var=0
+	if [ ${#_parse_arguments__FLAGS[@]} -ne 0 ] &&
+		echo "${_parse_arguments__FLAGS[@]}" | grep -q "\<${1:2}\>"; then
+		_has_flag__out_var=1
+	fi
+
+	if [ -n "$_has_flag__doc" ]; then
+		if [ "$_has_flag__out_var" -eq 1 ]; then
+			_u_options__record "$1" "$_has_flag__doc" "是" "指定"
+		else
+			_u_options__record "$1" "$_has_flag__doc" "否" "預設"
+		fi
+	fi
+	return 0
 }
 
+# u_get_option <短選項> <長選項> <default> <說明> <輸出變數>
+#   依序找短選項、長選項；都沒給時：
+#     default 為空字串 -> 必填，報錯結束（錯誤訊息會帶出說明）
+#     default 為 "x"   -> 選填，輸出空字串
+#     其他             -> 使用 default
+#   取到的值會記入參數摘要（見 u_print_options）。
 u_get_option() {
 	local _get_option__key1="$1"
 	local _get_option__key2="$2"
@@ -270,32 +294,115 @@ u_get_option() {
 	local _get_option__doc="$4"
 	local -n _get_option__out_var="$5"
 
+	local _get_option__label="$_get_option__key2"
+	if [ -n "$_get_option__key1" ]; then
+		_get_option__label="$_get_option__key1, $_get_option__key2"
+	fi
+
 	# 1. 檢查 key1 是否存在且有值
 	if [ -n "$_get_option__key1" ] && [ -n "${_parse_arguments__OPTS["$_get_option__key1"]}" ]; then
 		_get_option__out_var="${_parse_arguments__OPTS["$_get_option__key1"]}"
+		_u_options__record "$_get_option__label" "$_get_option__doc" "$_get_option__out_var" "指定"
 		return 0
 	fi
 
 	# 2. 檢查 key2 是否存在且有值
 	if [ -n "${_parse_arguments__OPTS["$_get_option__key2"]}" ]; then
 		_get_option__out_var="${_parse_arguments__OPTS["$_get_option__key2"]}"
+		_u_options__record "$_get_option__label" "$_get_option__doc" "$_get_option__out_var" "指定"
 		return 0
 	fi
 
 	# 3. 若都找不到，檢查參數數量是否大於等於 3 (代表有傳入 default_val)
 	if [ -n "$_get_option__default_val" ]; then
 		if [ "$_get_option__default_val" != "x" ]; then
-			echo "use default value for option '$_get_option__key1', '$_get_option__key2': $_get_option__default_val" >&2
+			echo "選項 $_get_option__label 未指定，使用預設值：$_get_option__default_val" >&2
 			_get_option__out_var="$_get_option__default_val"
+			_u_options__record "$_get_option__label" "$_get_option__doc" "$_get_option__out_var" "預設"
 			return 0
 		fi
 		_get_option__out_var=""
+		_u_options__record "$_get_option__label" "$_get_option__doc" "" "未指定"
 		return 0
 	fi
 
 	# 4. 若沒有預設值，報錯並終止 script
-	echo "missing option. '$_get_option__key1', '$_get_option__key2', $_get_option__doc" >&2
+	echo "錯誤：缺少必填選項 $_get_option__label：$_get_option__doc；加上 --help 查看用法" >&2
 	exit 1
+}
+
+# ---- 參數摘要 ----
+# u_get_argument、u_get_option、u_has_flag（有傳說明時）取值時會記錄下來，
+# 之後呼叫 u_print_options 一次印出，讓使用者在執行前確認每個參數的實際值與來源。
+# u_reset_options：清空參數摘要的紀錄。u_parse_arguments 會自動呼叫；
+#   也可在取完指令名稱後呼叫，讓摘要只列出該指令自己的參數。
+u_reset_options() {
+	_u_options__labels=()
+	_u_options__docs=()
+	_u_options__vals=()
+	_u_options__srcs=()
+}
+u_reset_options
+
+# _u_options__record <標籤> <說明> <值> <來源>；同一個標籤重複記錄時以最後一次為準
+_u_options__record() {
+	local i
+	for i in "${!_u_options__labels[@]}"; do
+		if [ "${_u_options__labels[$i]}" = "$1" ]; then
+			_u_options__docs[i]="$2"
+			_u_options__vals[i]="$3"
+			_u_options__srcs[i]="$4"
+			return 0
+		fi
+	done
+	_u_options__labels+=("$1")
+	_u_options__docs+=("$2")
+	_u_options__vals+=("$3")
+	_u_options__srcs+=("$4")
+}
+
+# _u_display_width <字串> <輸出變數>：終端機顯示寬度（中文等 3 位元組字元算 2 格）
+_u_display_width() {
+	local -n _display_width__out="$2"
+	local chars=${#1} bytes
+	bytes=$(printf '%s' "$1" | LC_ALL=C wc -c)
+	_display_width__out=$((chars + (bytes - chars) / 2))
+}
+
+# _u_pad_right <字串> <寬度>：補空白到指定顯示寬度
+_u_pad_right() {
+	local w
+	_u_display_width "$1" w
+	printf '%s%*s' "$1" $(($2 - w)) ""
+}
+
+# u_print_options [標題]
+#   印出目前為止記錄的參數，每行：選項  值  [來源]  說明
+#   來源為「指定」（命令列有給）、「預設」（用了預設值）或「未指定」（選填且沒給）。
+u_print_options() {
+	local title="${1:-參數}"
+	local n=${#_u_options__labels[@]}
+	if [ "$n" -eq 0 ]; then
+		return 0
+	fi
+	local i w w_label=0 w_val=0 val
+	for ((i = 0; i < n; i++)); do
+		val="${_u_options__vals[i]:-（空）}"
+		_u_display_width "${_u_options__labels[i]}" w
+		((w > w_label)) && w_label=$w
+		_u_display_width "$val" w
+		((w > w_val)) && w_val=$w
+	done
+	echo "$title:"
+	for ((i = 0; i < n; i++)); do
+		val="${_u_options__vals[i]:-（空）}"
+		printf '  %s  %s  [%s]  %s\n' \
+			"$(_u_pad_right "${_u_options__labels[i]}" "$w_label")" \
+			"$(_u_pad_right "$val" "$w_val")" \
+			"${_u_options__srcs[i]}" "${_u_options__docs[i]}"
+	done
+	echo ""
+	return 0
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
@@ -438,15 +545,19 @@ u_apt_install() {
 	sudo apt-get install -y "$_apt_install__pkg_name"
 }
 
+# u_check_cmd <參數>...
+#   執行前先印出參數摘要（u_print_options）與即將傳出的參數，等 5 秒或按任意鍵後繼續；
+#   要中止請按 Ctrl+C。stdin 不是終端機時不會卡住。
 u_check_cmd() {
 	local _check_cmd__cmd=("${@}")
 
-	echo "command:"
+	u_print_options
+	echo "將執行的參數:"
 	for i in "${_check_cmd__cmd[@]}"; do
 		echo "    $i"
 	done
 	echo ""
-	read -t 5 -n 1 -s -r -p "Press any key to continue (5s)..." input || true
+	read -t 5 -n 1 -s -r -p "按任意鍵繼續，5 秒後自動繼續（Ctrl+C 中止）..." input || true
 	echo ""
 }
 
